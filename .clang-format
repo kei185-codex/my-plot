@@ -29,8 +29,10 @@ BraceWrapping:
 SortIncludes: false
 AlignConsecutiveAssignments: true
 AlignConsecutiveDeclarations: true
-IndentCaseLabels: true
 
+BreakAfterOpenBracketFunction: true
+IndentCaseLabels: true
 BinPackArguments: false
 BinPackParameters: false
 AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false

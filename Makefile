@@ -1,3 +1,5 @@
+FORMAT_FILE := $(shell find src -name "*.cpp" -or -name "*.hpp" -type f)
+
 .PHONY:init  debug build clean
 
 init:
@@ -14,6 +16,10 @@ debug:
 
 run:
 	build/main
+
+
+format:
+	clang-format -i ${FORMAT_FILE}
 
 clean:
 	rm -rf build

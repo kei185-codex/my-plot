@@ -1,8 +1,9 @@
 #include <cstddef>
 #include <expected>
+#include <fstream>
 #include <memory>
+#include <print>
 #include <queue>
-#include <stop_token>
 #include <thread>
 #include <unistd.h>
 #include <cstdlib>
@@ -13,98 +14,118 @@
 #include "parser.hpp"
 #include "frame.hpp"
 #include "receiver.hpp"
+#include "transmitter.hpp"
 #include "manager.hpp"
 
 using namespace error;
 
 namespace manager
 {
-Streams::Streams()
-    : frame(std::make_unique<std::queue<frame::Frame>>()),
-      system(std::make_unique<std::queue<frame::systemMessage>>()),
+DataStreams::DataStreams()
+    : system(std::make_unique<std::queue<frame::systemMessage>>()),
       lidar(std::make_unique<std::queue<frame::LidarPoint>>())
 {}
 
 Manager::Manager(const std::string file)
-    : streams(Streams()), parsers(std::map<frame::Type, ParserInfo>()),
-      distributors(std::map<frame::Type, DistributorInfo>())
+    : f(std::fstream()),
+      frameStreams(std::make_unique<std::map<frame::Type, std::queue<frame::Frame>>>()),
+      dataStreams(DataStreams()), transmitter(), receiverWorker(), parsers(), distributors()
 {
+        this->transmitter = std::make_unique<transmitter::Transmitter>(this->f);
 
-        this->pReceiver = std::make_unique<receiver::Receiver>(file, *this->streams.frame.get());
+        for (auto type : frame::TYPES)
+                this->frameStreams->emplace(type, std::queue<frame::Frame>());
 
-        if (!Manager::initNode(this->parsers, this->distributors, this->streams))
+        this->receiverWorker.component =
+                std::make_unique<receiver::Receiver>(file, this->f, *this->frameStreams);
+
+        if (!Manager::initParsers(this->parsers, *this->frameStreams, this->dataStreams))
+                std::exit(1);
+
+        if (!Manager::initDistributors(this->distributors, this->dataStreams, *this->transmitter))
                 std::exit(1);
 }
 
 Manager::~Manager()
 {
-        for (auto& [_, parser] : this->parsers)
-                parser.thread.request_stop();
+        this->receiverWorker.thread.request_stop();
 
-        for (auto& [_, parser] : this->distributors)
-                parser.thread.request_stop();
+        for (auto& [_, p] : this->parsers)
+                if (auto _result = p.abort(); !_result.has_value())
+                        std::println(
+                                "{}: {}",
+                                std::this_thread::get_id(),
+                                toString(_result.error()));
+
+        for (auto& [_, d] : this->distributors)
+                if (auto _result = d.abort(); !_result.has_value())
+                        std::println(
+                                "{}: {}",
+                                std::this_thread::get_id(),
+                                toString(_result.error()));
 }
 
-template <typename T, typename U>
-void Manager::initParser(ParserInfo&    parserInfo,
-                         frame::Type    type,
-                         std::queue<T>& inQueue,
-                         std::queue<U>& outQueue)
+std::expected<void, Error> Manager::run()
 {
-        parserInfo.pParser = std::make_unique<parser::Parser<U>>(type, inQueue, outQueue);
-        parserInfo.thread  = std::jthread(
-                [parser = parserInfo.pParser.get()](std::stop_token st) { parser->parse(st); });
+        if (auto _result = this->receiverWorker.dispatch(); !_result.has_value())
+                return _result;
+
+        for (auto& [_, p] : this->parsers)
+                if (auto _result = p.dispatch(); !_result.has_value())
+                        return _result;
+
+        for (auto& [_, d] : this->distributors)
+                if (auto _result = d.dispatch(); !_result.has_value())
+                        return _result;
+
+        return {};
 }
 
-template <typename T>
-void Manager::initDistributor(DistributorInfo& distributorInfo,
-                              frame::Type      type,
-                              std::queue<T>&   inQueue)
+std::expected<void, Error> Manager::initParsers(
+        std::map<frame::Type, ParserWorker>&             parsers,
+        std::map<frame::Type, std::queue<frame::Frame>>& frameStreams,
+        DataStreams&                                     streams)
 {
-        distributorInfo.pDistributor = std::make_unique<distributor::Distributor<T>>(type, inQueue);
-        distributorInfo.thread =
-                std::jthread([distributor = distributorInfo.pDistributor.get()](
-                                     std::stop_token st) { distributor->distribute(st); });
-}
-
-std::expected<void, Error> Manager::initNode(std::map<frame::Type, ParserInfo>&      parsers,
-                                             std::map<frame::Type, DistributorInfo>& distributors,
-                                             Streams&                                streams)
-{
-        for (auto type : frame::TYPES) {
-                auto [pit, pSuccess] = parsers.try_emplace(type);
-                auto [dit, dSuccess] = distributors.try_emplace(type);
-
-                if (!(pSuccess && dSuccess))
+        for (auto type : frame::TYPES)
+                if (auto [it, success] = parsers.try_emplace(type); !success)
                         return std::unexpected<Error>(Error::NODE_INIT_FAILED);
 
-                auto& parserInfo      = pit->second;
-                auto& distributorInfo = dit->second;
-                switch (type) {
-                        case frame::Type::SYSTEM:
-                                Manager::initParser(parserInfo,
-                                                    type,
-                                                    *streams.frame.get(),
-                                                    *streams.system.get());
+        frame::Type type;
 
-                                Manager::initDistributor(distributorInfo,
-                                                         type,
-                                                         *streams.system.get());
-                                break;
-                        case frame::Type::LIDAR:
-                                Manager::initParser(parserInfo,
-                                                    type,
-                                                    *streams.frame.get(),
-                                                    *streams.lidar.get());
-                                Manager::initDistributor(distributorInfo,
-                                                         type,
-                                                         *streams.lidar.get());
+        type                    = frame::Type::SYSTEM;
+        parsers[type].component = std::make_unique<parser::Parser<frame::systemMessage>>(
+                type,
+                frameStreams[type],
+                *streams.system);
 
-                                break;
-                        default:
-                                break;
-                }
-        }
+        type                    = frame::Type::LIDAR;
+        parsers[type].component = std::make_unique<parser::Parser<frame::LidarPoint>>(
+                type,
+                frameStreams[type],
+                *streams.lidar);
+
+        return {};
+}
+
+std::expected<void, Error> Manager::initDistributors(
+        std::map<frame::Type, DistributorWorker>& distributors,
+        DataStreams&                              streams,
+        transmitter::Transmitter&                 transmitter)
+{
+
+        for (auto type : frame::TYPES)
+                if (auto [it, success] = distributors.try_emplace(type); !success)
+                        return std::unexpected<Error>(Error::NODE_INIT_FAILED);
+
+        frame::Type type;
+
+        type = frame::Type::SYSTEM;
+        distributors[type].component =
+                std::make_unique<distributor::DeviceController>(type, transmitter, *streams.system);
+
+        type = frame::Type::LIDAR;
+        distributors[type].component =
+                std::make_unique<distributor::Plotter<frame::LidarPoint>>(type, *streams.lidar);
 
         return {};
 }

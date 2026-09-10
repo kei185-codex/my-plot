@@ -9,25 +9,25 @@ namespace parser
 {
 struct ParserBase
 {
-        virtual void parse(std::stop_token) = 0;
-        virtual ~ParserBase()               = default;
+        virtual void run(std::stop_token) = 0;
+        virtual ~ParserBase()             = default;
 };
 
 template <typename T> struct Parser : public ParserBase
 {
-        frame::Type              type;
-        std::queue<frame::Frame> inQueue;
-        std::queue<T>            outQueue;
+        frame::Type               type;
+        std::queue<frame::Frame>& inQueue;
+        std::queue<T>&            outQueue;
 
         Parser(frame::Type type, std::queue<frame::Frame>& inQueue, std::queue<T>& outQueue)
             : type(type), inQueue(inQueue), outQueue(outQueue)
         {}
 
-        void                  parse(std::stop_token) override;
-        static std::vector<T> parsePayload(frame::Frame* fr);
+        void                  run(std::stop_token) override;
+        static std::vector<T> parsePayload(frame::Frame& fr);
 };
 
-template <typename T> void Parser<T>::parse(std::stop_token st)
+template <typename T> void Parser<T>::run(std::stop_token st)
 {
         while (1) {
                 if (st.stop_requested())

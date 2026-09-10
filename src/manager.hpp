@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <expected>
+#include <fstream>
 #include <memory>
 #include <queue>
 #include <thread>
@@ -14,53 +15,76 @@
 #include "parser.hpp"
 #include "frame.hpp"
 #include "receiver.hpp"
+#include "transmitter.hpp"
+
+using namespace error;
 
 namespace manager
 {
 
-struct ParserInfo
+template <typename Component> struct Worker
 {
-        std::unique_ptr<parser::ParserBase> pParser;
-        std::jthread                        thread;
+        std::unique_ptr<Component> component;
+        std::jthread               thread;
+
+        std::expected<void, Error> dispatch()
+        {
+                if (!this->component)
+                        return std::unexpected<Error>(Error::NODE_INIT_FAILED);
+
+                this->thread = std::jthread([component = this->component.get()](
+                                                    std::stop_token st) { component->run(st); });
+
+                return {};
+        }
+
+        std::expected<void, Error> abort()
+        {
+                if (!this->component)
+                        return std::unexpected<Error>(Error::NODE_INIT_FAILED);
+
+                this->thread.request_stop();
+
+                return {};
+        }
 };
 
-struct DistributorInfo
-{
-        std::unique_ptr<distributor::DistributorBase> pDistributor;
-        std::jthread                                  thread;
-};
+using ReceiverWorker    = Worker<receiver::Receiver>;
+using ParserWorker      = Worker<parser::ParserBase>;
+using DistributorWorker = Worker<distributor::Distributor>;
 
-struct Streams
+struct DataStreams
 {
-        std::unique_ptr<std::queue<frame::Frame>>         frame;
         std::unique_ptr<std::queue<frame::systemMessage>> system;
         std::unique_ptr<std::queue<frame::LidarPoint>>    lidar;
-        Streams();
+        DataStreams();
 };
 
 struct Manager
 {
-        Streams                                streams;
-        std::unique_ptr<receiver::Receiver>    pReceiver;
-        std::map<frame::Type, ParserInfo>      parsers;
-        std::map<frame::Type, DistributorInfo> distributors;
+        std::fstream f;
+
+        std::unique_ptr<std::map<frame::Type, std::queue<frame::Frame>>> frameStreams;
+        DataStreams                                                      dataStreams;
+
+        std::unique_ptr<transmitter::Transmitter> transmitter;
+        ReceiverWorker                            receiverWorker;
+        std::map<frame::Type, ParserWorker>       parsers;
+        std::map<frame::Type, DistributorWorker>  distributors;
 
         Manager(const std::string);
         ~Manager();
+        std::expected<void, Error> run();
 
-        template <typename T, typename U>
-        static void initParser(ParserInfo&    parserInfo,
-                               frame::Type    type,
-                               std::queue<T>& inQueue,
-                               std::queue<U>& outQueue);
+        static std::expected<void, Error> initParsers(
+                std::map<frame::Type, ParserWorker>&,
+                std::map<frame::Type, std::queue<frame::Frame>>&,
+                DataStreams&);
 
-        template <typename T>
-        static void
-        initDistributor(DistributorInfo& distributorInfo, frame::Type type, std::queue<T>& inQueue);
-
-        static std::expected<void, Error> initNode(std::map<frame::Type, ParserInfo>&,
-                                                   std::map<frame::Type, DistributorInfo>&,
-                                                   Streams& streams);
+        static std::expected<void, Error> initDistributors(
+                std::map<frame::Type, DistributorWorker>&,
+                DataStreams&,
+                transmitter::Transmitter&);
 };
 
 } // namespace manager
