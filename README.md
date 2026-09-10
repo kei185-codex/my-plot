@@ -1,3 +1,3 @@
-design: ai-assisted
-coding: ai-assisted
+design: ai-assisted  
+coding: ai-assisted  
 docs: ai-generated
