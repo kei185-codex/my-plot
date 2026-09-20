@@ -4,7 +4,7 @@ FORMAT_FILE := $(shell find src -name "*.cpp" -or -name "*.hpp" -type f)
 
 init:
 	cmake -S . -B build
-	ln -s  build/compile_commands_json compile_commands_json
+	ln -s  build/compile_commands.json compile_commands.json
 
 build:
 	cmake -S . -B build

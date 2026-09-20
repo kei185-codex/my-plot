@@ -4,12 +4,12 @@
 #include <queue>
 #include <stop_token>
 #include <unistd.h>
-#include <fstream>
 #include <cstdlib>
 #include <expected>
 
 #include "frame.hpp"
 #include "error.hpp"
+#include "io.hpp"
 
 using namespace error;
 
@@ -18,25 +18,18 @@ namespace receiver
 
 struct Receiver
 {
-        std::string                                      file;
-        std::fstream&                                    f;
+        io::Port&                                        port;
         std::map<frame::Type, std::queue<frame::Frame>>& frameStreams;
 
-        Receiver(
-                const std::string,
-                std::fstream&,
-                std::map<frame::Type, std::queue<frame::Frame>>&);
-
-        ~Receiver();
+        Receiver(io::Port&, std::map<frame::Type, std::queue<frame::Frame>>&);
 
         void run(std::stop_token);
 
-        static std::expected<void, Error>               findSOF(std::fstream&);
-        static std::expected<frame::FrameHeader, Error> getFrameHeader(std::fstream&);
+        static std::expected<void, Error>               findSOF(std::stop_token&, io::Port&);
+        static std::expected<frame::FrameHeader, Error> getFrameHeader(io::Port&);
         // TODO 実装する
         static bool isValidCRC(const frame::FrameHeader&);
-        // TODO 実装する
         static std::expected<frame::Frame, Error>
-        getPayload(std::fstream&, const frame::FrameHeader&);
+        getPayload(io::Port&, const frame::FrameHeader&);
 };
 } // namespace receiver

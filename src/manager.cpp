@@ -1,6 +1,5 @@
 #include <cstddef>
 #include <expected>
-#include <fstream>
 #include <memory>
 #include <print>
 #include <queue>
@@ -15,6 +14,7 @@
 #include "frame.hpp"
 #include "receiver.hpp"
 #include "transmitter.hpp"
+#include "io.hpp"
 #include "manager.hpp"
 
 using namespace error;
@@ -27,17 +27,16 @@ DataStreams::DataStreams()
 {}
 
 Manager::Manager(const std::string file)
-    : f(std::fstream()),
-      frameStreams(std::make_unique<std::map<frame::Type, std::queue<frame::Frame>>>()),
+    : port(file), frameStreams(std::make_unique<std::map<frame::Type, std::queue<frame::Frame>>>()),
       dataStreams(DataStreams()), transmitter(), receiverWorker(), parsers(), distributors()
 {
-        this->transmitter = std::make_unique<transmitter::Transmitter>(this->f);
+        this->transmitter = std::make_unique<transmitter::Transmitter>(this->port);
 
         for (auto type : frame::TYPES)
                 this->frameStreams->emplace(type, std::queue<frame::Frame>());
 
-        this->receiverWorker.component =
-                std::make_unique<receiver::Receiver>(file, this->f, *this->frameStreams);
+        this->receiverWorker.instance =
+                std::make_unique<receiver::Receiver>(this->port, *this->frameStreams);
 
         if (!Manager::initParsers(this->parsers, *this->frameStreams, this->dataStreams))
                 std::exit(1);
@@ -78,6 +77,8 @@ std::expected<void, Error> Manager::run()
                 if (auto _result = d.dispatch(); !_result.has_value())
                         return _result;
 
+        this->receiverWorker.thread.join();
+
         return {};
 }
 
@@ -92,14 +93,14 @@ std::expected<void, Error> Manager::initParsers(
 
         frame::Type type;
 
-        type                    = frame::Type::SYSTEM;
-        parsers[type].component = std::make_unique<parser::Parser<frame::systemMessage>>(
+        type                   = frame::Type::SYSTEM;
+        parsers[type].instance = std::make_unique<parser::Parser<frame::systemMessage>>(
                 type,
                 frameStreams[type],
                 *streams.system);
 
-        type                    = frame::Type::LIDAR;
-        parsers[type].component = std::make_unique<parser::Parser<frame::LidarPoint>>(
+        type                   = frame::Type::LIDAR;
+        parsers[type].instance = std::make_unique<parser::Parser<frame::LidarPoint>>(
                 type,
                 frameStreams[type],
                 *streams.lidar);
@@ -120,11 +121,11 @@ std::expected<void, Error> Manager::initDistributors(
         frame::Type type;
 
         type = frame::Type::SYSTEM;
-        distributors[type].component =
+        distributors[type].instance =
                 std::make_unique<distributor::DeviceController>(type, transmitter, *streams.system);
 
         type = frame::Type::LIDAR;
-        distributors[type].component =
+        distributors[type].instance =
                 std::make_unique<distributor::Plotter<frame::LidarPoint>>(type, *streams.lidar);
 
         return {};

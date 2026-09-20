@@ -19,11 +19,6 @@ void DeviceController::run(std::stop_token st)
         protocol::run(st, this->transmitter, this->inQueue);
 }
 
-// template <> void Plotter<frame::systemMessage>::distributeStuff(frame::systemMessage m)
-// {
-//         std::println("{}", m);
-// }
-
 template <> void Plotter<frame::LidarPoint>::distributeStuff(frame::LidarPoint m)
 {
         std::println("{}, {}", m.dist, m.angle);

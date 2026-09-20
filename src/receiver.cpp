@@ -1,3 +1,4 @@
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -5,13 +6,14 @@
 #include <stop_token>
 #include <thread>
 #include <unistd.h>
-#include <fstream>
 #include <cstdlib>
+#include <span>
 #include <vector>
 
 #include "receiver.hpp"
 #include "error.hpp"
 #include "frame.hpp"
+#include "io.hpp"
 
 using namespace error;
 
@@ -32,37 +34,23 @@ template <typename T> T unwrap(const std::expected<T, Error>&& result)
         return result.value();
 }
 
-Receiver::Receiver(
-        const std::string                                file,
-        std::fstream&                                    f,
-        std::map<frame::Type, std::queue<frame::Frame>>& frameStreams)
-    : file(file), f(f), frameStreams(frameStreams)
+Receiver::Receiver(io::Port& port, std::map<frame::Type, std::queue<frame::Frame>>& frameStreams)
+    : port(port), frameStreams(frameStreams)
 {}
-
-Receiver::~Receiver() { this->f.close(); }
 
 void Receiver::run(std::stop_token st)
 {
-        this->f.open(this->file, std::ios::binary | std::ios::in);
-
-        if (!(this->f.is_open() && f.good()))
-                return exit(1);
-
-        frame::FrameHeader frh;
+        frame::FrameHeader frh = {};
         frame::Frame       fr;
-        Error              err;
         while (1) {
-                if (st.stop_requested())
-                        return;
+                unwrap(this->findSOF(st, this->port));
 
-                unwrap(this->findSOF(this->f));
-
-                frh = unwrap(this->getFrameHeader(this->f));
+                frh = unwrap(this->getFrameHeader(this->port));
 
                 if (Receiver::isValidCRC(frh))
                         continue;
 
-                fr = unwrap(this->getPayload(this->f, frh));
+                fr = unwrap(this->getPayload(this->port, frh));
 
                 this->frameStreams[fr.type].push(fr);
         }
@@ -70,19 +58,25 @@ void Receiver::run(std::stop_token st)
         return;
 }
 
-std::expected<void, Error> Receiver::findSOF(std::fstream& f)
+std::expected<void, Error> Receiver::findSOF(std::stop_token& st, io::Port& port)
 {
-        uint8_t firstByte = -1;
+        std::array<uint8_t, 1> byte = {};
 
         while (1) {
+                if (st.stop_requested())
+                        return {};
 
-                if (!f.good())
-                        return std::unexpected<Error>(Error::FILE_INTERNAL_ERROR);
+                // TODO unwrapをつかう
+                if (auto result = port.readRaw(byte); !result)
+                        return std::unexpected<Error>(result.error());
 
-                if ((firstByte = f.get()) != frame::START_OF_FRAME[0])
+                if (byte[0] != frame::START_OF_FRAME[0])
                         continue;
 
-                if (f.get() != frame::START_OF_FRAME[1])
+                if (auto result = port.readRaw(byte); !result)
+                        return std::unexpected<Error>(result.error());
+
+                if (byte[0] != frame::START_OF_FRAME[1])
                         continue;
 
                 break;
@@ -91,29 +85,36 @@ std::expected<void, Error> Receiver::findSOF(std::fstream& f)
         return {};
 };
 
-std::expected<frame::FrameHeader, Error> Receiver::getFrameHeader(std::fstream& f)
+std::expected<frame::FrameHeader, Error> Receiver::getFrameHeader(io::Port& port)
 {
-        frame::FrameHeader frh = {};
-        f.read((char*)&frh, frame::FRAME_HEADER_SIZE);
+        std::array<uint8_t, 8> rawHeader = {};
 
-        if (!f.good())
-                return std::unexpected<Error>(Error::FILE_INTERNAL_ERROR);
+        auto result = port.readRaw(rawHeader);
+        if (!result)
+                return std::unexpected<Error>(result.error());
+
+        frame::FrameHeader frh = {
+                .length = io::decodeBigEndian(std::span<const uint8_t, 2>(rawHeader.data(), 2)),
+                .crc    = rawHeader[2],
+                .type   = static_cast<frame::Type>(rawHeader[3]),
+                .timestamp =
+                        io::decodeBigEndian(std::span<const uint8_t, 4>(rawHeader.data() + 4, 4)),
+        };
 
         return frh;
 }
 
 std::expected<frame::Frame, Error>
-Receiver::getPayload(std::fstream& f, const frame::FrameHeader& frh)
+Receiver::getPayload(io::Port& port, const frame::FrameHeader& frh)
 {
         frame::Frame fr;
         fr.length  = frh.length;
         fr.type    = frh.type;
-        fr.payload = std::vector<uint8_t>();
+        fr.payload = std::vector<uint8_t>(fr.length);
 
-        f.read((char*)fr.payload.data(), fr.length);
-
-        if (!f.good())
-                return std::unexpected<Error>(Error::FILE_INTERNAL_ERROR);
+        auto result = port.readRaw(std::span<uint8_t>(fr.payload));
+        if (!result.has_value())
+                return std::unexpected<Error>(result.error());
 
         return fr;
 }

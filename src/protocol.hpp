@@ -6,6 +6,7 @@
 
 namespace protocol
 {
+
 void run(std::stop_token, transmitter::Transmitter&, std::queue<frame::systemMessage>&);
 
 }

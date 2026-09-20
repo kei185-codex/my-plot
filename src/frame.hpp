@@ -11,16 +11,21 @@ namespace frame
 extern const int     OPERATION_TIMEOUT;
 extern const uint8_t START_OF_FRAME[];
 
+// TODO 更新する
 enum class OperationType
 {
+        WAIT_READY,
         GET_STATUS,
         START_SCAN,
         END_SCAN,
 };
 
+// TODO 更新する
 constexpr std::string_view toString(OperationType type)
 {
         switch (type) {
+                case OperationType::WAIT_READY:
+                        return "WAIT_READY";
                 case OperationType::GET_STATUS:
                         return "GET_STATUS";
                 case OperationType::START_SCAN:
@@ -65,6 +70,9 @@ struct FrameHeader
 };
 extern const size_t FRAME_HEADER_SIZE;
 
+/**
+ * payload field holds raw byte array that must be accessed with little endian
+ */
 struct Frame
 {
         uint16_t             length;
@@ -75,7 +83,7 @@ struct Frame
 struct LidarPoint
 {
         uint16_t dist;
-        int16_t  angle;
+        float    angle;
 };
 extern const size_t LIDAR_POINT_SIZE;
 

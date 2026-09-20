@@ -12,6 +12,8 @@ enum class Error
         CLOSE_FILE_FAILED,
         NODE_INIT_FAILED,
         FILE_INTERNAL_ERROR,
+        IO_READ_FAILED,
+        IO_WRITE_FAILED,
 };
 
 constexpr std::string_view toString(Error error)
@@ -25,6 +27,10 @@ constexpr std::string_view toString(Error error)
                         return "NODE_INIT_FAILED";
                 case Error::FILE_INTERNAL_ERROR:
                         return "FRAME_PARSE_FAILED";
+                case Error::IO_READ_FAILED:
+                        return "IO_READ_FAILED";
+                case Error::IO_WRITE_FAILED:
+                        return "IO_WRITE_FAILED";
                 default:
                         return "UNKNOWN";
         }

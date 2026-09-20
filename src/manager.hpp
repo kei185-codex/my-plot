@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <expected>
-#include <fstream>
 #include <memory>
 #include <queue>
 #include <thread>
@@ -14,6 +13,7 @@
 #include "error.hpp"
 #include "parser.hpp"
 #include "frame.hpp"
+#include "io.hpp"
 #include "receiver.hpp"
 #include "transmitter.hpp"
 
@@ -22,25 +22,26 @@ using namespace error;
 namespace manager
 {
 
-template <typename Component> struct Worker
+template <typename T> struct Worker
 {
-        std::unique_ptr<Component> component;
-        std::jthread               thread;
+        std::unique_ptr<T> instance;
+        std::jthread       thread;
 
         std::expected<void, Error> dispatch()
         {
-                if (!this->component)
+                if (!this->instance)
                         return std::unexpected<Error>(Error::NODE_INIT_FAILED);
 
-                this->thread = std::jthread([component = this->component.get()](
-                                                    std::stop_token st) { component->run(st); });
+                this->thread = std::jthread([component = this->instance.get()](std::stop_token st) {
+                        component->run(st);
+                });
 
                 return {};
         }
 
         std::expected<void, Error> abort()
         {
-                if (!this->component)
+                if (!this->instance)
                         return std::unexpected<Error>(Error::NODE_INIT_FAILED);
 
                 this->thread.request_stop();
@@ -62,7 +63,7 @@ struct DataStreams
 
 struct Manager
 {
-        std::fstream f;
+        io::Port port;
 
         std::unique_ptr<std::map<frame::Type, std::queue<frame::Frame>>> frameStreams;
         DataStreams                                                      dataStreams;

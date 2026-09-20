@@ -1,43 +1,43 @@
 #include "transmitter.hpp"
 #include "frame.hpp"
-#include <fstream>
+#include "io.hpp"
 #include <print>
 #include <queue>
+#include <span>
 #include <stop_token>
 #include <thread>
 
 namespace transmitter
 {
 
-Transmitter::Transmitter(std::fstream& f) : f(f) {}
+Transmitter::Transmitter(io::Port& port) : port(port) {}
 
-bool Transmitter::transmit(frame::OperationType type)
+std::expected<void, error::Error> Transmitter::transmit(frame::OperationType type)
 {
         const auto& command = frame::TX.at(type).command;
-        this->f.write(reinterpret_cast<const char*>(command.data()), command.size());
-        return this->f.good();
+        return this->port.writeRaw(std::span<const uint8_t>(command));
 }
 
-bool Transmitter::request(
+std::expected<void, error::Error> Transmitter::request(
         std::stop_token                   st,
         frame::OperationType              type,
         std::queue<frame::systemMessage>& mQueue)
 {
-        if (!this->transmit(type))
-                return false;
+        if (auto result = this->transmit(type); !result)
+                return result;
 
         std::println("{}: TRANSMIT {}", std::this_thread::get_id(), frame::toString(type));
 
         while (1) {
                 if (st.stop_requested())
-                        return true;
+                        return {};
 
                 if (mQueue.empty())
                         continue;
 
                 auto res = mQueue.front();
                 std::println("{}: RECEIVE {}", std::this_thread::get_id(), res);
-                return true;
+                return {};
         }
 };
 
