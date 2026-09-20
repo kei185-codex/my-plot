@@ -90,15 +90,9 @@ std::expected<void, error::Error> Port::writeRaw(std::span<const uint8_t> bytes)
 }
 
 /**
- * decodes bytes reading as  a little endian byte series
- * this is necessary for the reason below.
- *
- * B[1], B[2], B[3], B[4] are read in reverse way
- * for instance, these are read as blow when successive byte access:
- *      read((uint32_t)n, 4);
- * it gets [B[1],  B[2] , ..] as [4th byte, 3rd byte,...].
- * but we want to read as [B[4],  B[3] , ..].
- * so read it a byte basis here.
+ * Decodes a multi-byte integer from big-endian wire order. The value is
+ * assembled byte by byte so decoding does not depend on host endianness,
+ * alignment, or struct layout.
  */
 uint16_t decodeBigEndian(std::span<const uint8_t, 2> bytes)
 {

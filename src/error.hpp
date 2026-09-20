@@ -14,6 +14,8 @@ enum class Error
         FILE_INTERNAL_ERROR,
         IO_READ_FAILED,
         IO_WRITE_FAILED,
+        OPERATION_STOPPED,
+        OPERATION_TIMEOUT,
 };
 
 constexpr std::string_view toString(Error error)
@@ -26,11 +28,15 @@ constexpr std::string_view toString(Error error)
                 case Error::NODE_INIT_FAILED:
                         return "NODE_INIT_FAILED";
                 case Error::FILE_INTERNAL_ERROR:
-                        return "FRAME_PARSE_FAILED";
+                        return "FILE_INTERNAL_ERROR";
                 case Error::IO_READ_FAILED:
                         return "IO_READ_FAILED";
                 case Error::IO_WRITE_FAILED:
                         return "IO_WRITE_FAILED";
+                case Error::OPERATION_STOPPED:
+                        return "OPERATION_STOPPED";
+                case Error::OPERATION_TIMEOUT:
+                        return "OPERATION_TIMEOUT";
                 default:
                         return "UNKNOWN";
         }
